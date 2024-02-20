@@ -7,8 +7,25 @@ const AuthorizationError = require('../../exceptions/AuthorizationError');
 const { mapDBToModel } = require('../../utils/notes');
 
 class NotesService {
-    constructor() {
+    constructor(collaborationService) {
         this._pool = new Pool();
+        this._collaborationService = collaborationService;
+    }
+
+    async verifyNoteAccess(noteId, userId) {
+        try {
+            await this.verifyNoteOwner(noteId, userId);
+        } catch (error) {
+            if (error instanceof NotFoundError) {
+                throw error;
+            }
+
+            try {
+                await this._collaborationService.verifyCollaborator(noteId, userId);
+            } catch {
+                throw error;
+            }
+        }
     }
 
     async verifyNoteOwner(id, owner) {
@@ -51,16 +68,17 @@ class NotesService {
 
     async getNotes(owner) {
         const query = {
-            text: 'SELECT * FROM notes WHERE owner = $1',
+            text: 'SELECT a.* FROM notes a LEFT JOIN collaborations b ON a.id=b.note_id WHERE a.owner = $1 OR b.user_id = $1',
             values: [owner],
         };
+        
         const result = await this._pool.query(query);
         return result.rows.map(mapDBToModel);
     }
 
     async getNoteById(id) {
         const query = {
-            text: 'SELECT * FROM notes WHERE id = $1',
+            text: 'SELECT notes.*, users.username FROM notes LEFT JOIN users ON users.id = notes.owner WHERE notes.id = $1',
             values: [id],
         };
         const result = await this._pool.query(query);
